@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Parser data / artifacts
+*.db
+*.db-wal
+*.db-shm
+categories.json
+export/
+*.log
+sync_monitor.log

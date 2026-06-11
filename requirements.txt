@@ -1,0 +1,6 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+anthropic>=0.25.0          # for Claude API translation (step 4 --engine claude)
+deep-translator>=1.11.0    # for Google Translate (step 4 --engine google)
+# deepl>=1.18.0            # optional official DeepL SDK (step 4 uses requests directly)
