@@ -216,16 +216,22 @@ def parse_category_page(session: requests.Session, cat: dict, level: int = 1) ->
 
 
 def build_tree_from_cat_page(session: requests.Session, cat_url: str) -> list:
-    """
-    Parse the main catalog page and build the full category tree.
-    Uses a different approach: parse the sitemap-style cat.html directly.
-    """
+    """Fetch the main catalog page and build the full category tree."""
     log.info("Fetching main catalog page: %s", cat_url)
     soup = fetch_page(session, cat_url)
     if not soup:
         log.error("Failed to fetch catalog page")
         sys.exit(1)
+    return build_tree_from_soup(soup)
 
+
+def build_tree_from_soup(soup: BeautifulSoup) -> list:
+    """
+    Parse the main catalog page soup and build the full category tree.
+    Uses a different approach: parse the sitemap-style cat.html directly.
+
+    Pure (no network) so it can be exercised offline via --html-file / --self-test.
+    """
     categories = []
     seen_urls = set()
 
@@ -356,39 +362,99 @@ def count_categories(tree: list) -> int:
     return total
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Parse Thomann category tree")
-    parser.add_argument("--url", default="https://www.thomann.de/intl/cat.html")
-    parser.add_argument("--output", default="categories.json")
-    parser.add_argument("--proxy", default=None)
-    parser.add_argument("--delay", type=float, default=1.5)
-    args = parser.parse_args()
-
-    session = get_session()
-    if args.proxy:
-        session.proxies = {"http": args.proxy, "https": args.proxy}
-
-    tree = build_tree_from_cat_page(session, args.url)
-
+def save_output(tree: list, source_url: str, output_path: str):
+    """Write the category tree (+ flat list) to a JSON file and log a summary."""
     total = count_categories(tree)
     log.info("Total categories in tree: %d", total)
 
     output = {
-        "source_url": args.url,
+        "source_url": source_url,
         "total_categories": total,
         "top_level_count": len(tree),
         "tree": tree,
         "flat": flatten_categories(tree),
     }
 
-    with open(args.output, "w", encoding="utf-8") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
 
-    log.info("Saved to %s", args.output)
+    log.info("Saved to %s", output_path)
     log.info("Top-level categories:")
     for cat in tree:
         log.info("  [%d subcats] %s", len(cat.get("subcategories", [])), cat["name"])
 
 
+# Sample resembling Thomann's cat.html (flat single-segment .html links plus a
+# promo entry that must be skipped). Used by --self-test to validate parsing
+# without hitting the network.
+_SELF_TEST_HTML = """
+<html><body><main>
+  <a href="/intl/guitars_and_basses.html">Guitars and Basses</a>
+  <a href="/intl/guitars_and_basses/electric.html">Electric Guitars</a>
+  <a href="/intl/drums_and_percussion.html">Drums and Percussion</a>
+  <a href="/intl/hot_deals.html">Hot Deals</a>
+  <a href="https://www.facebook.com/thomann">Facebook</a>
+</main></body></html>
+"""
+
+
+def self_test() -> int:
+    """Run built-in parser checks against a sample page (no network)."""
+    assert extract_category_id("https://www.thomann.de/intl/electric_guitars.html") \
+        == "electric_guitars"
+    assert is_promo_category("Hot Deals") is True
+    assert is_promo_category("Guitars and Basses") is False
+
+    soup = BeautifulSoup(_SELF_TEST_HTML, "lxml")
+    tree = build_tree_from_soup(soup)
+
+    names = [c["name"] for c in tree]
+    assert names == ["Guitars and Basses", "Drums and Percussion"], names
+    # Deeper (multi-segment) URL is nested under its parent.
+    assert len(tree[0]["subcategories"]) == 1, tree[0]["subcategories"]
+    assert tree[0]["subcategories"][0]["name"] == "Electric Guitars"
+    # Promo ("Hot Deals") and the non-catalog Facebook link are dropped.
+    assert "Hot Deals" not in names
+    assert count_categories(tree) == 3
+
+    log.info("self-test OK: parsing, promo-filtering and nesting behave as expected")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Parse Thomann category tree")
+    parser.add_argument("--url", default="https://www.thomann.de/intl/cat.html")
+    parser.add_argument("--output", default="categories.json")
+    parser.add_argument("--proxy", default=None)
+    parser.add_argument("--delay", type=float, default=1.5)
+    parser.add_argument("--html-file", default=None,
+                        help="Parse a saved cat.html instead of fetching (offline).")
+    parser.add_argument("--self-test", action="store_true",
+                        help="Run built-in parser tests and exit (no network).")
+    args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
+
+    if args.html_file:
+        log.info("Parsing local HTML file: %s", args.html_file)
+        with open(args.html_file, encoding="utf-8", errors="replace") as f:
+            soup = BeautifulSoup(f.read(), "lxml")
+        tree = build_tree_from_soup(soup)
+        if not tree:
+            log.warning("No categories extracted — selectors may need tuning for "
+                        "this page; inspect the HTML structure.")
+        save_output(tree, f"file://{args.html_file}", args.output)
+        return 0
+
+    session = get_session()
+    if args.proxy:
+        session.proxies = {"http": args.proxy, "https": args.proxy}
+
+    tree = build_tree_from_cat_page(session, args.url)
+    save_output(tree, args.url, args.output)
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -28,6 +28,18 @@ python3 1_category_parser.py
 
 Результат: `categories.json` с полным деревом категорий.
 
+**Отладка парсинга без запросов к Thomann** (если дерево пустое/неполное — селекторы
+нужно подогнать под реальную вёрстку):
+
+```bash
+# Самопроверка логики парсинга на встроенном образце (без сети)
+python3 1_category_parser.py --self-test
+
+# Сохраните страницу один раз с домашнего IP и прогоняйте парсер по файлу:
+curl -A "Mozilla/5.0" https://www.thomann.de/intl/cat.html -o cat.html
+python3 1_category_parser.py --html-file cat.html --output categories.json
+```
+
 ---
 
 ### Шаг 2 — Собрать URL всех товаров
