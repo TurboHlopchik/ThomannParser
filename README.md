@@ -44,18 +44,26 @@ python3 1_category_parser.py --html-file cat.html --output categories.json
 
 ### Шаг 2 — Собрать URL всех товаров
 
+Сбор идёт через глобальный листинг `https://www.thomann.de/intl/search.html?ls=50&pg=N`
+(категорийные страницы у Thomann рисуются JavaScript'ом и для парсинга непригодны).
+Категория каждого товара подставляется позже из «хлебных крошек» на шаге 3.
+
 ```bash
-# Весь каталог
-python3 2_url_collector.py --categories categories.json --db products.db
+# Тест: первые 3 страницы (~150 товаров)
+python3 2_url_collector.py --max-pages 3
 
-# Только одна категория (рекомендуется для начала)
-python3 2_url_collector.py --categories categories.json --db products.db --category-filter "Guitars"
+# Весь каталог (~2500 страниц по 50 товаров, ~1.5 часа при задержке 2 сек)
+python3 2_url_collector.py
 
-# Продолжить после прерывания
+# Продолжить после прерывания (Ctrl+C) — с последней сохранённой страницы
 python3 2_url_collector.py --resume
+
+# Проверить разбор на сохранённой странице (без запросов)
+python3 2_url_collector.py --html-file search.html
+python3 2_url_collector.py --self-test
 ```
 
-Результат: `products.db` (SQLite) с URL всех товаров.
+Результат: `products.db` (SQLite) с URL всех товаров (status `pending`).
 
 ---
 

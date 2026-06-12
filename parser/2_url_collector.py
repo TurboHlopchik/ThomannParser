@@ -1,20 +1,29 @@
 #!/usr/bin/env python3
 """
-Step 2: Collect all product URLs from category pages.
-Reads categories.json, paginates through each leaf category,
-saves product URLs with their category path to products.db (SQLite).
+Step 2: Collect all product URLs from Thomann's global search listing.
+
+Thomann's category pages (electric_guitars.html, ...) are JS-rendered landing
+pages that only server-render a handful of products, so they cannot be scraped
+with requests.  The global listing at /intl/search.html, however, server-renders
+the full catalogue 50 products per page with working pagination:
+
+    https://www.thomann.de/intl/search.html?ls=50&pg=2
+
+This step paginates through it and stores every product URL into products.db
+(status = 'pending').  The crawl is resumable: the last completed page is saved,
+so Ctrl+C and re-run with --resume continues where it left off.  Per-product
+category is left empty here and filled later from the product page's breadcrumb
+in step 3.
 
 Usage:
-    python3 2_url_collector.py
-    python3 2_url_collector.py --categories categories.json --db products.db
-    python3 2_url_collector.py --category-filter "Guitars"   # only one top-level cat
-    python3 2_url_collector.py --resume                       # skip already-done categories
-
-Run can be interrupted and resumed with --resume.
+    python3 2_url_collector.py                       # crawl the whole catalogue
+    python3 2_url_collector.py --max-pages 20        # only 20 pages (testing)
+    python3 2_url_collector.py --resume              # continue from last page
+    python3 2_url_collector.py --html-file search.html   # offline parse test
+    python3 2_url_collector.py --self-test
 """
 
 import argparse
-import json
 import logging
 import re
 import sqlite3
@@ -41,6 +50,9 @@ HEADERS = {
 }
 
 BASE_URL = "https://www.thomann.de"
+SEARCH_PATH = "/intl/search.html"
+# A product detail page is a single-segment slug ending in .htm (not .html).
+_PRODUCT_RE = re.compile(r"^/intl/[a-z0-9][a-z0-9_.%-]*\.htm$", re.I)
 
 
 def init_db(db_path: str) -> sqlite3.Connection:
@@ -58,6 +70,7 @@ def init_db(db_path: str) -> sqlite3.Connection:
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Kept for backwards-compatibility with older databases.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS categories_done (
             category_id TEXT PRIMARY KEY,
@@ -66,10 +79,29 @@ def init_db(db_path: str) -> sqlite3.Connection:
             done_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Simple key/value store for resumable crawl progress.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS crawl_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON products(status)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_category ON products(category_id)")
     conn.commit()
     return conn
+
+
+def get_state(conn, key, default=None):
+    row = conn.execute("SELECT value FROM crawl_state WHERE key=?", (key,)).fetchone()
+    return row[0] if row else default
+
+
+def set_state(conn, key, value):
+    conn.execute(
+        "INSERT INTO crawl_state (key, value) VALUES (?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, str(value)),
+    )
 
 
 def get_session(proxy: Optional[str] = None) -> requests.Session:
@@ -87,237 +119,237 @@ def get_session(proxy: Optional[str] = None) -> requests.Session:
     return session
 
 
-def fetch(session: requests.Session, url: str, delay: float = 1.5) -> Optional[BeautifulSoup]:
-    time.sleep(delay)
-    try:
-        session.headers["Referer"] = BASE_URL + "/intl/"
-        resp = session.get(url, timeout=20)
+def fetch(session: requests.Session, url: str, delay: float = 2.0,
+          max_retries: int = 4) -> Optional[BeautifulSoup]:
+    """Fetch a page with throttling, IP-block detection and 429 back-off.
+
+    Returns a BeautifulSoup on success, or None on a non-recoverable error.
+    Exits the process on Thomann's host_not_allowed block.
+    """
+    for attempt in range(1, max_retries + 1):
+        time.sleep(delay)
+        try:
+            session.headers["Referer"] = BASE_URL + "/intl/"
+            resp = session.get(url, timeout=25)
+        except Exception as e:
+            log.warning("Request error (%s); retry %d/%d", e, attempt, max_retries)
+            time.sleep(5 * attempt)
+            continue
+
         if resp.status_code == 200:
+            # Cloudflare interstitial sometimes returns 200 with a challenge page.
+            if "Just a moment" in resp.text[:2000] and "challenge" in resp.text.lower():
+                log.warning("Cloudflare challenge; backing off %ds", 15 * attempt)
+                time.sleep(15 * attempt)
+                continue
             return BeautifulSoup(resp.text, "lxml")
-        if resp.status_code == 403:
-            if resp.headers.get("x-deny-reason") == "host_not_allowed":
-                log.error("IP blocked. Use --proxy with residential proxy.")
-                sys.exit(1)
+
+        if resp.status_code == 403 and resp.headers.get("x-deny-reason") == "host_not_allowed":
+            log.error("IP blocked (host_not_allowed). Run from a residential IP or use --proxy.")
+            sys.exit(1)
+
+        if resp.status_code == 429:
+            wait = 15 * attempt
+            log.warning("HTTP 429 (rate limited); backing off %ds (retry %d/%d)",
+                        wait, attempt, max_retries)
+            time.sleep(wait)
+            continue
+
         log.warning("HTTP %s: %s", resp.status_code, url)
         return None
-    except Exception as e:
-        log.error("Error fetching %s: %s", url, e)
-        return None
 
-
-def extract_product_urls(soup: BeautifulSoup, base_url: str) -> list:
-    """Extract product page URLs from a category listing page."""
-    urls = []
-    seen = set()
-
-    selectors = [
-        "a.product__link",
-        "a[class*='product-link']",
-        "a[class*='product__link']",
-        ".product-list__item a[href*='.htm']",
-        "article a[href*='.htm']",
-        ".fx-product-thumb a[href*='.htm']",
-        "a[data-product]",
-    ]
-
-    for sel in selectors:
-        for a in soup.select(sel):
-            href = a.get("href", "")
-            if not href or ".htm" not in href:
-                continue
-            full = urljoin(base_url, href).split("?")[0]
-            if full not in seen and "thomann.de" in full:
-                seen.add(full)
-                urls.append(full)
-        if urls:
-            break
-
-    # Fallback: any .htm link that looks like a product (has numeric ID in URL)
-    if not urls:
-        for a in soup.select("a[href*='.htm']"):
-            href = a.get("href", "")
-            full = urljoin(base_url, href).split("?")[0]
-            if re.search(r"\d{5,}", full) and full not in seen:
-                seen.add(full)
-                urls.append(full)
-
-    return urls
-
-
-def get_total_pages(soup: BeautifulSoup) -> int:
-    """Detect total number of pages in pagination."""
-    # Look for last page number
-    pagination = soup.select(".pagination a, [class*='pagination'] a, [aria-label*='page' i]")
-    max_page = 1
-    for el in pagination:
-        text = el.get_text(strip=True)
-        m = re.search(r"(\d+)", text)
-        if m:
-            max_page = max(max_page, int(m.group(1)))
-
-    # Also check for "next" with page count text
-    total_text = soup.select_one("[class*='total'], [class*='results-count'], .count")
-    if total_text:
-        m = re.search(r"(\d+)", total_text.get_text())
-        if m:
-            per_page = len(extract_product_urls(soup, "")) or 50
-            max_page = max(max_page, -(-int(m.group(1)) // per_page))  # ceiling division
-
-    return max_page
-
-
-def get_next_page_url(soup: BeautifulSoup, current_url: str) -> Optional[str]:
-    next_el = soup.select_one("a[rel='next'], a[class*='next'], [aria-label='next page' i]")
-    if next_el:
-        href = next_el.get("href", "")
-        if href:
-            return urljoin(current_url, href)
-
-    # Try incrementing pg= or pg parameter
-    for pattern, replace in [
-        (r"([?&]pg=)(\d+)", lambda m: m.group(1) + str(int(m.group(2)) + 1)),
-        (r"(/pg)(\d+)", lambda m: m.group(1) + str(int(m.group(2)) + 1)),
-    ]:
-        if re.search(pattern, current_url):
-            return re.sub(pattern, replace, current_url)
-
-    # Append first page param
-    if "pg=" not in current_url and "/pg" not in current_url:
-        sep = "&" if "?" in current_url else "?"
-        return current_url + sep + "pg=2"
-
+    log.error("Giving up on %s after %d retries", url, max_retries)
     return None
 
 
-def collect_category(
-    session: requests.Session,
-    cat: dict,
-    conn: sqlite3.Connection,
-    delay: float,
-) -> int:
-    """Paginate through a category and insert product URLs into DB."""
-    cat_url = cat["url"]
-    cat_id = cat["id"]
-    cat_name = cat["name"]
-    cat_path = cat.get("category_path", cat_name)
+def search_url(page: int, ls: int = 50) -> str:
+    return f"{BASE_URL}{SEARCH_PATH}?ls={ls}&pg={page}"
 
-    log.info("Category: %s | %s", cat_path, cat_url)
 
-    soup = fetch(session, cat_url, delay)
-    if not soup:
-        return 0
+def extract_product_urls(soup: BeautifulSoup, base_url: str = BASE_URL + SEARCH_PATH) -> list:
+    """Return absolute product detail URLs from a search results page.
 
-    total_found = 0
-    page = 1
-    current_url = cat_url
+    Products are single-segment '.htm' links; recommendation carousels are
+    excluded so only the actual result list is collected.
+    """
+    urls = []
+    seen = set()
+    for a in soup.find_all("a", href=True):
+        if a.find_parent(class_=re.compile("carousel")):
+            continue
+        full = urljoin(base_url, a["href"]).split("?")[0].split("#")[0]
+        full = full.replace("http://", "https://")
+        path = full.split("thomann.de", 1)[-1] if "thomann.de" in full else full
+        if not _PRODUCT_RE.match(path):
+            continue
+        if full not in seen:
+            seen.add(full)
+            urls.append(full)
+    return urls
+
+
+def article_from_url(url: str) -> str:
+    m = re.search(r"_(\d{6,})\.htm", url)
+    return m.group(1) if m else ""
+
+
+def detect_total_pages(soup: BeautifulSoup, ls: int) -> Optional[int]:
+    """Best-effort total page count from the result-count text, if present."""
+    text = soup.get_text(" ", strip=True)
+    m = re.search(r"([\d,. ]{3,})\s*(?:results|items|Artikel|products)", text, re.I)
+    if m:
+        digits = re.sub(r"[^\d]", "", m.group(1))
+        if digits:
+            total = int(digits)
+            return -(-total // ls)  # ceil
+    return None
+
+
+def crawl_search(session, conn, ls, start_page, max_pages, delay) -> int:
+    page = start_page
+    last_page = start_page + max_pages - 1 if max_pages else None
+    added_total = 0
+    empty_streak = 0
+    no_new_streak = 0
+    total_pages = None
 
     while True:
-        product_urls = extract_product_urls(soup, current_url)
-        log.info("  Page %d: %d products", page, len(product_urls))
-
-        for purl in product_urls:
-            article = ""
-            m = re.search(r"_(\d{6,})\.htm", purl)
-            if m:
-                article = m.group(1)
-            try:
-                conn.execute(
-                    "INSERT OR IGNORE INTO products (url, article, category_id, category_name, category_path) VALUES (?,?,?,?,?)",
-                    (purl, article, cat_id, cat_name, cat_path),
-                )
-            except sqlite3.Error as e:
-                log.warning("DB insert error: %s", e)
-
-        conn.commit()
-        total_found += len(product_urls)
-
-        next_url = get_next_page_url(soup, current_url)
-        if not next_url or next_url == current_url or not product_urls:
+        if last_page and page > last_page:
+            log.info("Reached page limit (%d)", last_page)
             break
+
+        soup = fetch(session, search_url(page, ls), delay)
+        if soup is None:
+            log.warning("Page %d failed; stopping (resume with --resume)", page)
+            break
+
+        if total_pages is None:
+            total_pages = detect_total_pages(soup, ls)
+            if total_pages:
+                log.info("Catalogue spans ~%d pages (ls=%d)", total_pages, ls)
+
+        urls = extract_product_urls(soup)
+        if not urls:
+            empty_streak += 1
+            log.info("Page %d: 0 products (empty streak %d)", page, empty_streak)
+            if empty_streak >= 2:
+                log.info("Two empty pages in a row — assuming end of catalogue.")
+                break
+            page += 1
+            continue
+        empty_streak = 0
+
+        added = 0
+        for purl in urls:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO products (url, article, status) VALUES (?,?, 'pending')",
+                (purl, article_from_url(purl)),
+            )
+            added += cur.rowcount
+        added_total += added
+        set_state(conn, "search_last_page", page)
+        conn.commit()
+
+        suffix = f"/{total_pages}" if total_pages else ""
+        log.info("Page %d%s: %d products, +%d new (%d new total)",
+                 page, suffix, len(urls), added, added_total)
+
+        # Thomann caps deep pagination by repeating the last page; if we stop
+        # getting new URLs for several pages, we've reached the real end.
+        if added == 0:
+            no_new_streak += 1
+            if no_new_streak >= 3:
+                log.info("No new products for 3 pages — stopping.")
+                break
+        else:
+            no_new_streak = 0
 
         page += 1
-        soup = fetch(session, next_url, delay)
-        if not soup:
-            break
-        current_url = next_url
 
-    # Mark category as done
-    conn.execute(
-        "INSERT OR REPLACE INTO categories_done (category_id, url, products_found) VALUES (?,?,?)",
-        (cat_id, cat_url, total_found),
-    )
-    conn.commit()
-    log.info("  Done: %d total product URLs collected", total_found)
-    return total_found
+    return added_total
 
 
-def get_leaf_categories(tree: list, parent_path: str = "") -> list:
-    """Return all categories, annotated with full path string."""
-    result = []
-    for cat in tree:
-        path = f"{parent_path} > {cat['name']}" if parent_path else cat["name"]
-        cat_copy = dict(cat)
-        cat_copy["category_path"] = path
-        subcats = cat.get("subcategories", [])
-        if subcats:
-            result.extend(get_leaf_categories(subcats, path))
-        else:
-            result.append(cat_copy)
-    return result
+# ─── Offline test helpers ─────────────────────────────────────────────────────
+
+_SELF_TEST_HTML = """
+<html><body>
+  <div class="fx-carousel"><a href="recommended_product.htm">Reco</a></div>
+  <ul class="search-results">
+    <li><a href="peavey_112_1x12_cab.htm">Peavey 112</a></li>
+    <li><a href="gibson_les_paul_standard_60s_aaa_lb.htm">Gibson LP</a></li>
+    <li><a href="harley_benton_st_20_bk_472390.htm">HB ST-20</a></li>
+  </ul>
+  <a href="electric_guitars.html">a category (ignored)</a>
+  <a href="peavey_112_1x12_cab.htm">duplicate</a>
+</body></html>
+"""
+
+
+def self_test() -> int:
+    soup = BeautifulSoup(_SELF_TEST_HTML, "lxml")
+    urls = extract_product_urls(soup)
+    assert urls == [
+        "https://www.thomann.de/intl/peavey_112_1x12_cab.htm",
+        "https://www.thomann.de/intl/gibson_les_paul_standard_60s_aaa_lb.htm",
+        "https://www.thomann.de/intl/harley_benton_st_20_bk_472390.htm",
+    ], urls
+    assert article_from_url("https://www.thomann.de/intl/harley_benton_st_20_bk_472390.htm") == "472390"
+    assert article_from_url("https://www.thomann.de/intl/peavey_112_1x12_cab.htm") == ""
+    assert search_url(2) == "https://www.thomann.de/intl/search.html?ls=50&pg=2"
+    print("self-test OK: product extraction, carousel exclusion and paging URLs")
+    return 0
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Collect product URLs from Thomann categories")
-    parser.add_argument("--categories", default="categories.json")
+    parser = argparse.ArgumentParser(description="Collect product URLs from Thomann search.html")
     parser.add_argument("--db", default="products.db")
-    parser.add_argument("--category-filter", default=None, help="Only process top-level category matching this name")
-    parser.add_argument("--resume", action="store_true", help="Skip already-processed categories")
-    parser.add_argument("--delay", type=float, default=1.5)
+    parser.add_argument("--ls", type=int, default=50, help="Products per page (Thomann: 25/50/100)")
+    parser.add_argument("--max-pages", type=int, default=None, help="Limit number of pages (testing)")
+    parser.add_argument("--start-page", type=int, default=1)
+    parser.add_argument("--resume", action="store_true", help="Continue from the last completed page")
+    parser.add_argument("--delay", type=float, default=2.0)
     parser.add_argument("--proxy", default=None)
+    parser.add_argument("--html-file", default=None, help="Parse a saved search.html (offline)")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
 
-    with open(args.categories, encoding="utf-8") as f:
-        data = json.load(f)
+    if args.self_test:
+        return self_test()
 
-    tree = data.get("tree", data) if isinstance(data, dict) else data
-
-    # Filter to one top-level category if requested
-    if args.category_filter:
-        filtered = [c for c in tree if args.category_filter.lower() in c["name"].lower()]
-        if not filtered:
-            log.error("Category '%s' not found. Available: %s",
-                      args.category_filter, [c["name"] for c in tree])
-            sys.exit(1)
-        tree = filtered
-        log.info("Filtering to: %s", [c["name"] for c in tree])
-
-    # Get all leaf categories with paths
-    leaves = get_leaf_categories(tree)
-    log.info("Total leaf categories to process: %d", len(leaves))
+    if args.html_file:
+        with open(args.html_file, encoding="utf-8", errors="replace") as f:
+            soup = BeautifulSoup(f.read(), "lxml")
+        urls = extract_product_urls(soup)
+        log.info("Extracted %d product URLs from %s", len(urls), args.html_file)
+        for u in urls[:20]:
+            print("  ", u)
+        return 0
 
     conn = init_db(args.db)
     session = get_session(args.proxy)
 
-    # Get already-done categories if resuming
-    done_ids = set()
+    start_page = args.start_page
     if args.resume:
-        rows = conn.execute("SELECT category_id FROM categories_done").fetchall()
-        done_ids = {r[0] for r in rows}
-        log.info("Resuming: %d categories already done", len(done_ids))
+        last = get_state(conn, "search_last_page")
+        if last:
+            start_page = int(last) + 1
+            log.info("Resuming from page %d", start_page)
 
-    total_products = 0
-    for i, cat in enumerate(leaves, 1):
-        if cat["id"] in done_ids:
-            log.info("[%d/%d] Skipping (done): %s", i, len(leaves), cat["category_path"])
-            continue
-        log.info("[%d/%d]", i, len(leaves))
-        count = collect_category(session, cat, conn, args.delay)
-        total_products += count
+    log.info("Collecting product URLs from %s (ls=%d, from page %d)",
+             BASE_URL + SEARCH_PATH, args.ls, start_page)
+    try:
+        added = crawl_search(session, conn, args.ls, start_page, args.max_pages, args.delay)
+    except KeyboardInterrupt:
+        conn.commit()
+        log.warning("Interrupted — progress saved. Re-run with --resume to continue.")
+        conn.close()
+        return 130
 
-    total_in_db = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
-    log.info("Done. Total product URLs in DB: %d", total_in_db)
+    total = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+    log.info("Done. Added %d new URLs this run. Total product URLs in DB: %d", added, total)
     conn.close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
