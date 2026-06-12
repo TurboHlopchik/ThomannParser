@@ -148,6 +148,22 @@ def og(soup: BeautifulSoup, prop: str) -> str:
     return (m.get("content") or "").strip() if m else ""
 
 
+def meta_itemprop(soup: BeautifulSoup, name: str) -> str:
+    """Return a schema.org microdata <meta itemprop="..."> content value."""
+    m = soup.find("meta", attrs={"itemprop": name})
+    return (m.get("content") or "").strip() if m else ""
+
+
+def _num(value: str) -> str:
+    """Machine number string (schema.org price, dot=decimal) -> normalised float str."""
+    if not value:
+        return ""
+    try:
+        return str(float(value.replace(",", ".")))
+    except ValueError:
+        return ""
+
+
 def parse_breadcrumb(soup: BeautifulSoup) -> list:
     """Clean breadcrumb trail (the DOM duplicates it for mobile/desktop)."""
     bc = soup.select_one("[class*='readcrumb']")
@@ -231,10 +247,15 @@ def parse_product(soup: BeautifulSoup, url: str) -> dict:
             article = m.group(1)
     p["article"] = article
 
-    # --- Price (scope to the buy box to avoid unrelated prices on the page) ---
+    # --- Price ---
+    # Prefer the schema.org microdata meta (present site-wide, machine-formatted
+    # with dot as decimal); fall back to the visual EU-formatted buy-box price.
+    p["price"] = _num(meta_itemprop(soup, "price"))
+    if not p["price"]:
+        box = soup.select_one(".price-and-availability") or soup
+        pe = box.select_one("[class*='fx-price-group__primary']")
+        p["price"] = clean_price(pe.get_text()) if pe else ""
     box = soup.select_one(".price-and-availability") or soup
-    pe = box.select_one("[class*='fx-price-group__primary']")
-    p["price"] = clean_price(pe.get_text()) if pe else ""
     rrp = box.select_one("[class*='rrp'], [class*='uvp'], [class*='strike'], del")
     p["old_price"] = clean_price(rrp.get_text()) if rrp else ""
 
@@ -280,6 +301,8 @@ _SELF_TEST_HTML = """
   <meta property="og:title" content="Gibson Les Paul Standard 60s AAA LB">
   <meta property="og:description" content="Electric Guitar, Top: AAA flamed maple, Body: Mahogany">
   <meta property="og:image" content="https://www.thomann.de/thumb/opengraph/pics/prod/617050.jpg">
+  <meta itemprop="price" content="2555">
+  <meta itemprop="priceCurrency" content="EUR">
 </head><body>
   <nav class="fx-breadcrumb">
     <a href="/intl/cat.html">All Categories</a>
@@ -305,6 +328,7 @@ _SELF_TEST_HTML = """
 
 
 def self_test() -> int:
+    assert _num("2555") == "2555.0" and _num("5.90") == "5.9" and _num("") == ""
     assert clean_price("2.555 €") == "2555.0", clean_price("2.555 €")
     assert clean_price("5,90 €") == "5.9", clean_price("5,90 €")
     assert clean_price("2.555,90 €") == "2555.9", clean_price("2.555,90 €")
