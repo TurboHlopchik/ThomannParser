@@ -194,15 +194,23 @@ def article_from_url(url: str) -> str:
 
 
 def detect_total_pages(soup: BeautifulSoup, ls: int) -> Optional[int]:
-    """Best-effort total page count from the result-count text, if present."""
+    """Best-effort total page count from the result-count text, if present.
+
+    Picks the LARGEST number that precedes a results/items keyword (the
+    catalogue total, e.g. '124,152 results'), ignoring small incidental counts.
+    """
     text = soup.get_text(" ", strip=True)
-    m = re.search(r"([\d,. ]{3,})\s*(?:results|items|Artikel|products)", text, re.I)
-    if m:
+    counts = []
+    for m in re.finditer(r"(\d[\d,.]{2,})\s*(?:results|items|Artikel|products)", text, re.I):
         digits = re.sub(r"[^\d]", "", m.group(1))
         if digits:
-            total = int(digits)
-            return -(-total // ls)  # ceil
-    return None
+            counts.append(int(digits))
+    if not counts:
+        return None
+    total = max(counts)
+    if total <= ls:
+        return None
+    return -(-total // ls)  # ceil
 
 
 def crawl_search(session, conn, ls, start_page, max_pages, delay) -> int:
@@ -210,8 +218,9 @@ def crawl_search(session, conn, ls, start_page, max_pages, delay) -> int:
     last_page = start_page + max_pages - 1 if max_pages else None
     added_total = 0
     empty_streak = 0
-    no_new_streak = 0
+    repeat_streak = 0
     total_pages = None
+    seen_this_run = set()  # detect Thomann repeating pages at the real end/cap
 
     while True:
         if last_page and page > last_page:
@@ -239,6 +248,22 @@ def crawl_search(session, conn, ls, start_page, max_pages, delay) -> int:
             continue
         empty_streak = 0
 
+        # Stop when the listing starts repeating pages we've already walked THIS
+        # run (Thomann caps deep pagination by re-serving the last page). This is
+        # independent of what's already in the DB, so re-runs don't stop early.
+        fresh = [u for u in urls if u not in seen_this_run]
+        if not fresh:
+            repeat_streak += 1
+            log.info("Page %d: all %d already seen this run (repeat streak %d)",
+                     page, len(urls), repeat_streak)
+            if repeat_streak >= 2:
+                log.info("Listing is repeating — reached the end of the catalogue.")
+                break
+            page += 1
+            continue
+        repeat_streak = 0
+        seen_this_run.update(urls)
+
         added = 0
         for purl in urls:
             cur = conn.execute(
@@ -251,18 +276,8 @@ def crawl_search(session, conn, ls, start_page, max_pages, delay) -> int:
         conn.commit()
 
         suffix = f"/{total_pages}" if total_pages else ""
-        log.info("Page %d%s: %d products, +%d new (%d new total)",
-                 page, suffix, len(urls), added, added_total)
-
-        # Thomann caps deep pagination by repeating the last page; if we stop
-        # getting new URLs for several pages, we've reached the real end.
-        if added == 0:
-            no_new_streak += 1
-            if no_new_streak >= 3:
-                log.info("No new products for 3 pages — stopping.")
-                break
-        else:
-            no_new_streak = 0
+        log.info("Page %d%s: %d products, +%d new to DB (%d new this run)",
+                 page, suffix, len(urls), added, len(seen_this_run))
 
         page += 1
 
