@@ -120,18 +120,44 @@ def fetch(session: requests.Session, url: str, delay: float = 2.0) -> Optional[B
 
 
 def clean_price(text: str) -> str:
+    """Parse a Thomann (intl, European-formatted) price string to a number.
+
+    Format: dot = thousands separator, comma = decimal — e.g. '2.555 €' = 2555,
+    '5,90 €' = 5.90, '2.555,90 €' = 2555.90.
+    """
     if not text:
         return ""
-    cleaned = re.sub(r"[^\d,.]", "", text.strip())
-    cleaned = cleaned.replace(",", ".")
-    # Handle "1.299.00" → "1299.00"
-    parts = cleaned.split(".")
-    if len(parts) > 2:
-        cleaned = "".join(parts[:-1]) + "." + parts[-1]
+    s = re.sub(r"[^\d.,]", "", text.strip())
+    if not s:
+        return ""
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")   # dot thousands, comma decimal
+    elif "," in s:
+        s = s.replace(",", ".")                     # comma is the decimal mark
+    else:
+        s = s.replace(".", "")                      # lone dot = thousands (intl)
     try:
-        return str(float(cleaned))
+        return str(float(s))
     except ValueError:
-        return cleaned
+        return s
+
+
+def og(soup: BeautifulSoup, prop: str) -> str:
+    """Return an Open Graph / meta content value."""
+    m = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
+    return (m.get("content") or "").strip() if m else ""
+
+
+def parse_breadcrumb(soup: BeautifulSoup) -> list:
+    """Clean breadcrumb trail (the DOM duplicates it for mobile/desktop)."""
+    bc = soup.select_one("[class*='readcrumb']")
+    out = []
+    if bc:
+        for a in bc.find_all("a", href=True):
+            t = a.get_text(strip=True)
+            if t and t not in ("···", "All Categories", "Home") and t not in out:
+                out.append(t)
+    return out
 
 
 def make_alias(title: str) -> str:
@@ -143,192 +169,163 @@ def make_alias(title: str) -> str:
 
 
 def parse_product(soup: BeautifulSoup, url: str) -> dict:
+    """Extract product fields from a Thomann product page (current frontend).
+
+    The page is a JS app with no JSON-LD, but ships Open Graph meta tags, a
+    ``li.keyfeature`` spec list, a breadcrumb and ``.price-and-availability``
+    price block — which together cover everything we need.
+    """
     p = {}
 
-    # Title
-    for sel in ["h1.product-title", "h1[class*='title']", ".fx-pdp-header__title", "h1"]:
-        el = soup.select_one(sel)
-        if el:
-            p["pagetitle"] = el.get_text(strip=True)
-            p["alias"] = make_alias(p["pagetitle"])
-            break
+    # --- Title ---
+    title = og(soup, "og:title")
+    if not title:
+        h1 = soup.find("h1")
+        title = h1.get_text(strip=True) if h1 else ""
+    p["pagetitle"] = title
+    p["alias"] = make_alias(title)
 
-    # Brand
-    for sel in ["span[class*='manufacturer']", "a[class*='brand']", "span[class*='brand']",
-                "[itemprop='brand']", ".fx-pdp-header__manufacturer"]:
-        el = soup.select_one(sel)
-        if el:
-            p["brand"] = el.get_text(strip=True)
-            break
+    # --- Brand (manufacturer logo alt; fall back to last breadcrumb crumb) ---
+    brand = ""
+    bl = soup.select_one(
+        "img[src*='manufacturer'][alt], img[src*='/logo/'][alt], img[class*='manufacturer'][alt]"
+    )
+    if bl:
+        brand = (bl.get("alt") or "").strip()
+    crumbs = parse_breadcrumb(soup)
+    if not brand and crumbs:
+        brand = crumbs[-1]
+    p["brand"] = brand
+    p["longtitle"] = title  # og:title already contains the brand
 
-    p["longtitle"] = f"{p.get('brand', '')} {p.get('pagetitle', '')}".strip()
+    # --- Category (breadcrumb minus the trailing brand crumb) ---
+    cat_crumbs = [c for c in crumbs if c != brand]
+    p["category_path"] = " > ".join(cat_crumbs)
+    p["category_name"] = cat_crumbs[-1] if cat_crumbs else ""
+    p["category_id"] = make_alias(p["category_name"]) if p["category_name"] else ""
 
-    # Article / SKU
-    for sel in ["[class*='article-number']", "[class*='product-id']", "[data-article]"]:
-        el = soup.select_one(sel)
-        if el:
-            article = re.sub(r"[^\d]", "", el.get_text())
-            if article:
-                p["article"] = article
-                break
-    if "article" not in p:
-        m = re.search(r"_(\d{6,})\.htm", url)
-        if m:
-            p["article"] = m.group(1)
-
-    # Price
-    for sel in [
-        ".fx-product-stage-price__sale",
-        ".product-price__main-price",
-        "[class*='price--current']",
-        "[class*='price-sale']",
-        ".our-price",
-        "[itemprop='price']",
-    ]:
-        el = soup.select_one(sel)
-        if el:
-            price_text = el.get("content") or el.get_text()
-            p["price"] = clean_price(price_text)
-            if p["price"]:
-                break
-
-    for sel in [
-        ".fx-product-stage-price__uvp",
-        "[class*='price--before']",
-        "[class*='price--old']",
-        "[class*='price-old']",
-    ]:
-        el = soup.select_one(sel)
-        if el:
-            p["old_price"] = clean_price(el.get_text())
-            if p["old_price"]:
-                break
-
-    # Main image
-    for sel in [
-        ".pdp-image__main img",
-        ".product-images__main img",
-        ".fx-pdp-image__main img",
-        "[class*='product-image'] img[class*='main']",
-        ".product-stage img",
-    ]:
-        el = soup.select_one(sel)
-        if el:
-            src = el.get("data-src") or el.get("data-zoom-src") or el.get("src", "")
-            if src:
-                if src.startswith("//"):
-                    src = "https:" + src
-                p["image"] = src
-                break
-
-    # Gallery
-    gallery = []
-    seen = {p.get("image", "")}
-    for sel in [
-        ".product-images__thumbnails img",
-        ".fx-pdp-images__thumbs img",
-        "[class*='thumbnails'] img",
-        "[class*='thumb-list'] img",
-    ]:
-        for img in soup.select(sel):
-            src = img.get("data-zoom-src") or img.get("data-src") or img.get("src", "")
-            src = re.sub(r"_\d+x\d+(\.[a-z]+)$", r"\1", src)
-            if src.startswith("//"):
-                src = "https:" + src
-            if src and src not in seen and "placeholder" not in src:
-                seen.add(src)
-                gallery.append(src)
-        if gallery:
-            break
-    p["gallery"] = "||".join(gallery)
-
-    # Short description
-    for sel in [
-        ".fx-pdp-teaser",
-        ".product-teaser",
-        "[class*='description--short']",
-        "[class*='short-description']",
-    ]:
-        el = soup.select_one(sel)
-        if el:
-            p["description"] = el.get_text(separator=" ", strip=True)[:600]
-            break
-
-    # Full description (HTML)
-    for sel in [
-        ".fx-pdp-description",
-        ".product-detail-description",
-        "[class*='description-text']",
-        "[class*='product-description']",
-    ]:
-        el = soup.select_one(sel)
-        if el:
-            p["content"] = str(el)
-            if not p.get("description"):
-                p["description"] = el.get_text(separator=" ", strip=True)[:600]
-            break
-
-    # Technical specs
+    # --- Technical specs (li.keyfeature -> label/value) ---
     props = {}
-
-    # Method 1: table rows
-    for table_sel in [
-        "table[class*='spec']",
-        "table[class*='feature']",
-        ".product-features table",
-        ".specifications table",
-        "[class*='tech-specs'] table",
-    ]:
-        for table in soup.select(table_sel):
-            for row in table.select("tr"):
-                cells = row.select("th, td")
-                if len(cells) >= 2:
-                    key = cells[0].get_text(strip=True)
-                    val = " | ".join(c.get_text(strip=True) for c in cells[1:])
-                    if key and val:
-                        props[key] = val
-
-    # Method 2: definition lists
-    for dl in soup.select("dl[class*='spec'], dl[class*='feature'], .product-features dl"):
-        keys = dl.select("dt")
-        vals = dl.select("dd")
-        for k, v in zip(keys, vals):
-            key = k.get_text(strip=True)
-            val = v.get_text(strip=True)
-            if key:
-                props[key] = val
-
-    # Method 3: feature list items
-    if not props:
-        for item in soup.select("[class*='feature__item'], [class*='spec-item']"):
-            label = item.select_one("[class*='label'], [class*='name'], dt, strong")
-            value = item.select_one("[class*='value'], dd")
-            if label and value:
-                props[label.get_text(strip=True)] = value.get_text(strip=True)
-
+    for li in soup.select("li.keyfeature"):
+        lab = li.select_one(".keyfeature__label")
+        if not lab:
+            continue
+        key = lab.get_text(strip=True)
+        full = li.get_text(" ", strip=True)
+        val = full[len(key):].strip() if full.startswith(key) else full.replace(key, "", 1).strip()
+        if key and val:
+            props[key] = val
     p["properties"] = json.dumps(props, ensure_ascii=False)
 
-    # Rating
-    for sel in ["[itemprop='ratingValue']", "[class*='rating__value']"]:
-        el = soup.select_one(sel)
-        if el:
-            p["rating"] = el.get("content") or el.get_text(strip=True)
-            break
+    # --- Article number (from og:image .../pics/prod/<id>.jpg, then specs) ---
+    og_image = og(soup, "og:image")
+    article = ""
+    m = re.search(r"pics/prod/(\d+)", og_image)
+    if m:
+        article = m.group(1)
+    if not article and "Item number" in props:
+        article = re.sub(r"[^\d]", "", props["Item number"])
+    if not article:
+        m = re.search(r"_(\d{6,})\.htm", url)
+        if m:
+            article = m.group(1)
+    p["article"] = article
 
-    for sel in ["[itemprop='reviewCount']", "[class*='rating__count']"]:
-        el = soup.select_one(sel)
-        if el:
-            p["reviews_count"] = re.sub(r"[^\d]", "", el.get_text())
-            break
+    # --- Price (scope to the buy box to avoid unrelated prices on the page) ---
+    box = soup.select_one(".price-and-availability") or soup
+    pe = box.select_one("[class*='fx-price-group__primary']")
+    p["price"] = clean_price(pe.get_text()) if pe else ""
+    rrp = box.select_one("[class*='rrp'], [class*='uvp'], [class*='strike'], del")
+    p["old_price"] = clean_price(rrp.get_text()) if rrp else ""
 
-    # Availability
-    for sel in ["[class*='availability']", "[class*='delivery-info']", "[class*='stock']"]:
-        el = soup.select_one(sel)
-        if el:
-            p["availability"] = el.get_text(strip=True)[:150]
+    # --- Images (gallery is JS-loaded; use the canonical full-size main image) ---
+    if article:
+        p["image"] = f"https://thumbs.static-thomann.de/thumb/thumb1000x1000/pics/prod/{article}.jpg"
+    else:
+        p["image"] = og_image
+    p["gallery"] = ""
+
+    # --- Description + content (build clean HTML from og:description + specs) ---
+    desc = og(soup, "og:description")
+    p["description"] = desc[:600]
+    content = f"<p>{desc}</p>" if desc else ""
+    if props:
+        rows = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in props.items())
+        content += f"<table>{rows}</table>"
+    p["content"] = content
+
+    # --- Rating / reviews ---
+    rv = soup.select_one("[itemprop='ratingValue']")
+    if rv:
+        p["rating"] = rv.get("content") or rv.get_text(strip=True)
+    rc = soup.select_one("[class*='review']")
+    if rc:
+        mm = re.search(r"\d+", rc.get_text())
+        p["reviews_count"] = mm.group(0) if mm else ""
+
+    # --- Availability (text in the buy box that isn't a price) ---
+    avail = ""
+    for s in box.find_all(string=re.compile(r"(in stock|available|delivery|weeks?|days?|sold out)", re.I)):
+        t = re.sub(r"\s+", " ", s).strip()
+        if t and "€" not in t and len(t) < 80:
+            avail = t
             break
+    p["availability"] = avail
 
     return p
+
+
+_SELF_TEST_HTML = """
+<html><head>
+  <meta property="og:title" content="Gibson Les Paul Standard 60s AAA LB">
+  <meta property="og:description" content="Electric Guitar, Top: AAA flamed maple, Body: Mahogany">
+  <meta property="og:image" content="https://www.thomann.de/thumb/opengraph/pics/prod/617050.jpg">
+</head><body>
+  <nav class="fx-breadcrumb">
+    <a href="/intl/cat.html">All Categories</a>
+    <a href="/intl/guitars_and_basses.html">Guitars &amp; Basses</a>
+    <a href="/intl/electric_guitars.html">Electric Guitars</a>
+    <a href="/intl/lp_models.html">Single Cut Guitars</a>
+    <a href="/intl/gibson_brand.html">Gibson</a>
+  </nav>
+  <img src="/manufacturer/gibson_logo.png" alt="Gibson">
+  <div class="price-and-availability">
+    <div class="fx-price-group"><span class="fx-price-group__primary">2.555&nbsp;€</span></div>
+    <span class="availability__text">In stock</span>
+  </div>
+  <ul>
+    <li class="keyfeature"><span class="keyfeature__label">Colour</span> <span>Lemon Burst</span></li>
+    <li class="keyfeature"><span class="keyfeature__label">Body</span> <span>Mahogany</span></li>
+    <li class="keyfeature"><span class="keyfeature__label">Item number</span> <span>617050</span></li>
+  </ul>
+  <span itemprop="ratingValue">4.5</span>
+  <div class="review-count">2 Customer ratings</div>
+</body></html>
+"""
+
+
+def self_test() -> int:
+    assert clean_price("2.555 €") == "2555.0", clean_price("2.555 €")
+    assert clean_price("5,90 €") == "5.9", clean_price("5,90 €")
+    assert clean_price("2.555,90 €") == "2555.9", clean_price("2.555,90 €")
+    assert clean_price("125 €") == "125.0"
+
+    soup = BeautifulSoup(_SELF_TEST_HTML, "lxml")
+    d = parse_product(soup, "https://www.thomann.de/intl/gibson_les_paul_standard_60s_aaa_lb.htm")
+    assert d["pagetitle"] == "Gibson Les Paul Standard 60s AAA LB", d["pagetitle"]
+    assert d["brand"] == "Gibson", d["brand"]
+    assert d["price"] == "2555.0", d["price"]
+    assert d["article"] == "617050", d["article"]
+    assert d["category_path"] == "Guitars & Basses > Electric Guitars > Single Cut Guitars", d["category_path"]
+    assert d["category_name"] == "Single Cut Guitars"
+    assert d["image"].endswith("/pics/prod/617050.jpg")
+    assert d["rating"] == "4.5"
+    assert d["reviews_count"] == "2", d["reviews_count"]
+    props = json.loads(d["properties"])
+    assert props.get("Colour") == "Lemon Burst" and props.get("Body") == "Mahogany"
+    assert d["availability"] == "In stock", d["availability"]
+    print("self-test OK: og/title/brand/price(EU)/article/category/specs/rating")
+    return 0
 
 
 def main():
@@ -338,7 +335,28 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="Max products to scrape (for testing)")
     parser.add_argument("--category", default=None, help="Filter by category name")
     parser.add_argument("--proxy", default=None)
+    parser.add_argument("--html-file", default=None,
+                        help="Parse a saved product page and print the result (offline).")
+    parser.add_argument("--url", default="https://www.thomann.de/intl/product.htm",
+                        help="URL context to use with --html-file.")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
+
+    if args.html_file:
+        import json as _json
+        with open(args.html_file, encoding="utf-8", errors="replace") as f:
+            soup = BeautifulSoup(f.read(), "lxml")
+        data = parse_product(soup, args.url)
+        for k, v in data.items():
+            if k == "properties":
+                props = _json.loads(v or "{}")
+                print(f"  {k:13s}: {len(props)} specs -> {list(props.items())[:3]}")
+            else:
+                print(f"  {k:13s}: {str(v)[:90]}")
+        return 0
 
     conn = init_db(args.db)
     session = get_session(args.proxy)
@@ -385,6 +403,10 @@ def main():
                     longtitle = ?,
                     alias = ?,
                     brand = ?,
+                    article = COALESCE(NULLIF(?, ''), article),
+                    category_id = COALESCE(NULLIF(?, ''), category_id),
+                    category_name = COALESCE(NULLIF(?, ''), category_name),
+                    category_path = COALESCE(NULLIF(?, ''), category_path),
                     description = ?,
                     content = ?,
                     price = ?,
@@ -403,6 +425,10 @@ def main():
                 data.get("longtitle"),
                 data.get("alias"),
                 data.get("brand"),
+                data.get("article") or "",
+                data.get("category_id") or "",
+                data.get("category_name") or "",
+                data.get("category_path") or "",
                 data.get("description"),
                 data.get("content"),
                 data.get("price"),
@@ -443,4 +469,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
