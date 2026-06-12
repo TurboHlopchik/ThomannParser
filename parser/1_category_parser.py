@@ -16,12 +16,15 @@ import re
 import sys
 import time
 from typing import Optional
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
+
+CAT_PAGE_URL = "https://www.thomann.de/intl/cat.html"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -222,16 +225,77 @@ def build_tree_from_cat_page(session: requests.Session, cat_url: str) -> list:
     if not soup:
         log.error("Failed to fetch catalog page")
         sys.exit(1)
-    return build_tree_from_soup(soup)
+    return build_tree_from_soup(soup, cat_url)
 
 
-def build_tree_from_soup(soup: BeautifulSoup) -> list:
+def _clean_category_name(text: str) -> str:
+    """Strip the trailing item counter ('Guitars 33,254 items') and whitespace."""
+    text = re.sub(r"\s*[\d.,]+\s*items?\s*$", "", text.strip(), flags=re.I)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def build_tree_from_soup(soup: BeautifulSoup, base_url: str = CAT_PAGE_URL) -> list:
     """
-    Parse the main catalog page soup and build the full category tree.
-    Uses a different approach: parse the sitemap-style cat.html directly.
+    Parse the main catalog page soup and build the category tree.
+
+    Thomann's cat.html is laid out as 17 groups, each a ``div.category`` holding
+    a ``div.headline a`` (the top-level category) and a ``ul.categories-list`` of
+    ``a.categories-list__link`` sub-categories.  Category hrefs are relative
+    (``electric_guitars.html``) and resolved against ``base_url``.
 
     Pure (no network) so it can be exercised offline via --html-file / --self-test.
+    Falls back to a generic link scan if the expected layout is not present.
     """
+    categories = []
+    seen_urls = set()
+
+    for group in soup.select("div.category"):
+        head = group.select_one("div.headline a[href]")
+        if not head:
+            continue
+        top_name = _clean_category_name(head.get_text(" ", strip=True))
+        top_url = urljoin(base_url, head["href"])
+        if not top_name or is_promo_category(top_name) or top_url in seen_urls:
+            continue
+        seen_urls.add(top_url)
+
+        cat = {
+            "id": extract_category_id(top_url),
+            "name": top_name,
+            "url": top_url,
+            "level": 1,
+            "parent_id": None,
+            "subcategories": [],
+        }
+
+        for a in group.select("ul.categories-list li.categories-list__item a.categories-list__link[href]"):
+            sub_name = _clean_category_name(a.get_text(" ", strip=True))
+            sub_url = urljoin(base_url, a["href"])
+            if not sub_name or is_promo_category(sub_name) or sub_url in seen_urls:
+                continue
+            seen_urls.add(sub_url)
+            cat["subcategories"].append({
+                "id": extract_category_id(sub_url),
+                "name": sub_name,
+                "url": sub_url,
+                "level": 2,
+                "parent_id": cat["id"],
+                "subcategories": [],
+            })
+
+        categories.append(cat)
+
+    if categories:
+        log.info("Found %d top-level categories (%d total)",
+                 len(categories), count_categories(categories))
+        return categories
+
+    log.warning("Expected catalogue layout not found — falling back to generic scan")
+    return _build_tree_generic(soup, base_url)
+
+
+def _build_tree_generic(soup: BeautifulSoup, base_url: str = CAT_PAGE_URL) -> list:
+    """Legacy fallback: best-effort tree from generic heading/link structures."""
     categories = []
     seen_urls = set()
 
@@ -384,17 +448,26 @@ def save_output(tree: list, source_url: str, output_path: str):
         log.info("  [%d subcats] %s", len(cat.get("subcategories", [])), cat["name"])
 
 
-# Sample resembling Thomann's cat.html (flat single-segment .html links plus a
-# promo entry that must be skipped). Used by --self-test to validate parsing
-# without hitting the network.
+# Sample mirroring Thomann's real cat.html layout: groups as div.category with a
+# div.headline top link (its text carries an item counter that must be stripped)
+# and a ul.categories-list of sub-category links with relative hrefs. Used by
+# --self-test to validate parsing without hitting the network.
 _SELF_TEST_HTML = """
-<html><body><main>
-  <a href="/intl/guitars_and_basses.html">Guitars and Basses</a>
-  <a href="/intl/guitars_and_basses/electric.html">Electric Guitars</a>
-  <a href="/intl/drums_and_percussion.html">Drums and Percussion</a>
-  <a href="/intl/hot_deals.html">Hot Deals</a>
-  <a href="https://www.facebook.com/thomann">Facebook</a>
-</main></body></html>
+<html><body>
+  <div class="category">
+    <div class="headline"><a href="guitars_and_basses.html">Guitars and Basses 33,254 items</a></div>
+    <ul class="categories-list fx-list category__list">
+      <li class="categories-list__item"><a class="categories-list__link" href="electric_guitars.html">Electric Guitars</a></li>
+      <li class="categories-list__item"><a class="categories-list__link" href="electric_basses.html">Electric Basses</a></li>
+    </ul>
+  </div>
+  <div class="category">
+    <div class="headline"><a href="drums_and_percussion.html">Drums and Percussion 20,835 items</a></div>
+    <ul class="categories-list fx-list category__list">
+      <li class="categories-list__item"><a class="categories-list__link" href="acoustic_drums.html">Acoustic Drums</a></li>
+    </ul>
+  </div>
+</body></html>
 """
 
 
@@ -404,20 +477,22 @@ def self_test() -> int:
         == "electric_guitars"
     assert is_promo_category("Hot Deals") is True
     assert is_promo_category("Guitars and Basses") is False
+    assert _clean_category_name("Guitars and Basses 33,254 items") == "Guitars and Basses"
 
     soup = BeautifulSoup(_SELF_TEST_HTML, "lxml")
     tree = build_tree_from_soup(soup)
 
     names = [c["name"] for c in tree]
     assert names == ["Guitars and Basses", "Drums and Percussion"], names
-    # Deeper (multi-segment) URL is nested under its parent.
-    assert len(tree[0]["subcategories"]) == 1, tree[0]["subcategories"]
+    # Item counter is stripped from the top-level name; href resolved to absolute.
+    assert tree[0]["url"] == "https://www.thomann.de/intl/guitars_and_basses.html", tree[0]["url"]
+    # Sub-categories parsed under their group.
+    assert len(tree[0]["subcategories"]) == 2, tree[0]["subcategories"]
     assert tree[0]["subcategories"][0]["name"] == "Electric Guitars"
-    # Promo ("Hot Deals") and the non-catalog Facebook link are dropped.
-    assert "Hot Deals" not in names
-    assert count_categories(tree) == 3
+    assert tree[0]["subcategories"][0]["url"].endswith("/intl/electric_guitars.html")
+    assert count_categories(tree) == 5  # 2 top + 3 sub
 
-    log.info("self-test OK: parsing, promo-filtering and nesting behave as expected")
+    log.info("self-test OK: parsing, counter-stripping, promo-filter and nesting OK")
     return 0
 
 
