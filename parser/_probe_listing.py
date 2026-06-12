@@ -25,12 +25,10 @@ HEADERS = {
 }
 
 CANDIDATES = [
-    "/intl/electric_guitars.html",
-    "/intl/electric_guitars.html?ls=25&pg=1",
+    "/intl/search.html",
+    "/intl/search.html?ls=50&pg=1",
+    "/intl/search.html?ls=50&pg=2",
     "/intl/electric_guitars.html?ls=25&pg=2",
-    "/intl/st_models.html",
-    "/intl/st_models.html?ls=25&pg=1",
-    "/intl/st_models.html?ls=25&pg=2",
 ]
 
 
@@ -50,6 +48,20 @@ def all_products(soup):
     for a in soup.find_all("a", href=True):
         h = a["href"].split("?")[0]
         if re.search(r"/?[a-z0-9_]+\.htm$", h) and h not in out:
+            out.append(h)
+    return out
+
+
+def non_carousel_products(soup):
+    """Product .htm links that are NOT inside a carousel (recommendations)."""
+    out = []
+    for a in soup.find_all("a", href=True):
+        h = a["href"].split("?")[0]
+        if not re.search(r"/?[a-z0-9_]+\.htm$", h):
+            continue
+        if a.find_parent(class_=re.compile("carousel")):
+            continue
+        if h not in out:
             out.append(h)
     return out
 
@@ -79,11 +91,12 @@ def main():
         soup = BeautifulSoup(r.text, "lxml")
         g = grid_products(soup)
         a = all_products(soup)
+        nc = non_carousel_products(soup)
         title = (soup.title.get_text(strip=True) if soup.title else "")[:50]
         print(f"\n{path}")
         print(f"  {info} | bytes={len(r.text)} | title={title!r}")
-        print(f"  grid(js-articles) products: {len(g)} | all .htm on page: {len(a)}")
-        print(f"  first 3 grid hrefs: {g[:3]}")
+        print(f"  grid(js-articles): {len(g)} | non-carousel .htm: {len(nc)} | all .htm: {len(a)}")
+        print(f"  first 3 non-carousel hrefs: {nc[:3]}")
         time.sleep(2)
 
 
