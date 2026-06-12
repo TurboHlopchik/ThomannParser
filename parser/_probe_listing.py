@@ -25,11 +25,15 @@ HEADERS = {
 }
 
 CANDIDATES = [
-    "/intl/search.html",
-    "/intl/search.html?ls=50&pg=1",
-    "/intl/search.html?ls=50&pg=2",
-    "/intl/electric_guitars.html?ls=25&pg=2",
+    # Does a category page render the full list when paginated (like search.html)?
+    "/intl/electric_guitars.html?ls=50&pg=1",
+    "/intl/electric_guitars.html?ls=50&pg=2",
+    "/intl/electric_guitars.html?ls=50&pg=3",
+    # A deeper leaf category:
+    "/intl/st_models.html?ls=50&pg=1",
+    "/intl/st_models.html?ls=50&pg=2",
 ]
+PROBE_DELAY = 4  # be gentle: avoid Cloudflare 429
 
 
 def grid_products(soup):
@@ -97,7 +101,7 @@ def main():
         print(f"  {info} | bytes={len(r.text)} | title={title!r}")
         print(f"  grid(js-articles): {len(g)} | non-carousel .htm: {len(nc)} | all .htm: {len(a)}")
         print(f"  first 3 non-carousel hrefs: {nc[:3]}")
-        time.sleep(2)
+        time.sleep(PROBE_DELAY)
 
 
 if __name__ == "__main__":
