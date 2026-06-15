@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 CSV_BASE_FIELDS = [
     "pagetitle", "longtitle", "alias", "description", "content",
     "price", "old_price", "article", "image", "gallery",
-    "category", "vendor", "rating", "reviews_count",
+    "category", "vendor", "brand", "rating", "reviews_count",
     "availability", "source_url",
 ]
 
@@ -81,7 +81,10 @@ def row_to_dict(row: sqlite3.Row, use_russian: bool) -> dict:
         d["_options"] = options
     else:
         d["_options"] = en_props
-    d["vendor"] = d.get("brand") or ""
+    # brand kept as plain text for display ([[+brand]] in tiles); vendor mirrors
+    # it so ImpEx3 can also map it to the MiniShop3 manufacturer (filterable).
+    d["brand"] = d.get("brand") or ""
+    d["vendor"] = d["brand"]
     d["category"] = d.get("category_path") or d.get("category_name") or ""
     d["source_url"] = d.get("url") or ""
     d["gallery"] = d.get("gallery") or ""

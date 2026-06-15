@@ -28,7 +28,14 @@
 
     <div class="sf-cat-body">
 
-        {* ---------- ФИЛЬТРЫ (mFilter2) ---------- *}
+        {* ---------- ФИЛЬТРЫ ----------
+           MiniShop3-адаптация: фасеты строятся по бренду (vendor), цене и опциям
+           товара. Опции импортируются парсером как option.<ключ> и привязываются
+           к категории в MS3 — соответствующие фасеты `option|<ключ>` добавляются
+           под конкретный раздел (наборы характеристик у категорий разные).
+           Имя/синтаксис фильтрующего сниппета сверьте с версией mFilter для
+           MiniShop3 (в miniShop2 это был mFilter2).
+        *}
         <aside class="sf-filters">
             <div class="sf-filters__head"><span>Фильтры</span><button class="sf-filters__reset" type="button" data-mfilter-reset>Сбросить все</button></div>
             [[!mFilter2?
@@ -36,12 +43,12 @@
                 &parents=`[[*id]]`
                 &tplOuter=`tpl.mfilterOuter`
                 &filters=`
-                    ms|category:mstpl;
-                    msvendor:default;
+                    ms|vendor:default;
                     ms|price:number;
-                    tv.material:default
+                    option|body:default;
+                    option|color:default
                 `
-                &tpls=`category==tpl.mfilterCheckbox;msvendor==tpl.mfilterCheckbox`
+                &tpls=`vendor==tpl.mfilterCheckbox`
             ]]
             <button class="ms-btn ms-btn--lg ms-btn--dark ms-btn--block" type="submit" form="mse2_filters">Показать товары</button>
         </aside>
