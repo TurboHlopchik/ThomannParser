@@ -1,0 +1,71 @@
+<!-- @dsCard group="Storefront" viewport="1280x900" name="Storefront" subtitle="Home · Catalog · Product · Cart — interactive recreation" -->
+<!-- @startingPoint section="Storefront" subtitle="Full instrument-shop storefront: home, catalog, product, cart" viewport="1280x900" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#FFFFFF">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>ЦМИ — магазин музыкальных инструментов</title>
+<link rel="stylesheet" href="../../styles.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Golos+Text:wght@400;500;600;700;800;900&family=Onest:wght@400;500;600;700;800&family=Unbounded:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="storefront.css">
+<link rel="stylesheet" href="pages.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script>
+/* Lazy DS namespace — tolerate _ds_bundle.js executing AFTER consumer scripts,
+   which happens in inlined/standalone builds where the large bundle loads async.
+   When the bundle loads first (normal page) the real components are returned and
+   this is fully transparent; when a screen script runs first, it receives a
+   render-time wrapper that resolves the real component once the bundle arrives. */
+(function () {
+  var real = {}, cache = {};
+  function wrap(name) {
+    if (cache[name]) return cache[name];
+    function C(props) { var R = real[name]; return R ? React.createElement(R, props) : null; }
+    C.displayName = name;
+    return (cache[name] = C);
+  }
+  window.MusicStoreDesignSystem_f8f6e3 = new Proxy({}, {
+    get: function (t, p) {
+      if (typeof p === 'string' && /^[A-Z]/.test(p)) return real[p] || wrap(p);
+      return real[p];
+    },
+    set: function (t, p, v) { real[p] = v; return true; },
+    has: function (t, p) { return p in real; },
+    ownKeys: function () { return Object.keys(real); },
+    getOwnPropertyDescriptor: function (t, p) {
+      return { enumerable: true, configurable: true, value: real[p] };
+    }
+  });
+})();
+</script>
+<script src="../../_ds_bundle.js"></script>
+<script src="data.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tweaks.jsx"></script>
+<script type="text/babel" src="Chrome.jsx"></script>
+<script type="text/babel" src="HomeScreen.jsx"></script>
+<script type="text/babel" src="CatalogHubScreen.jsx"></script>
+<script type="text/babel" src="CategoryScreen.jsx"></script>
+<script type="text/babel" src="CatalogScreen.jsx"></script>
+<script type="text/babel" src="ProductScreen.jsx"></script>
+<script type="text/babel" src="ProfileScreen.jsx"></script>
+<script type="text/babel" src="NewsScreen.jsx"></script>
+<script type="text/babel" src="ArticleScreen.jsx"></script>
+<script type="text/babel" src="WarrantyScreen.jsx"></script>
+<script type="text/babel" src="ContactsScreen.jsx"></script>
+<script type="text/babel" src="CartScreen.jsx"></script>
+<script type="text/babel" src="App.jsx"></script>
+</body>
+</html>

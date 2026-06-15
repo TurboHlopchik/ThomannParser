@@ -1,0 +1,9 @@
+/* ============================================================
+   FONTS — Inter (Latin + Cyrillic)
+   Loaded from Google Fonts. Substitution note: the brief
+   specifies Inter; no licensed binaries were provided, so we
+   use the Google-hosted webfont. Swap the @import for local
+   @font-face rules if self-hosting is required.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');

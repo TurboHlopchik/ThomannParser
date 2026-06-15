@@ -1,0 +1,80 @@
+/* ============================================================
+   COLOR TOKENS — ЦМИ (Центр Музыкальных Инструментов)
+   Violet accent on clean cool-white surfaces.
+   Premium, editorial e-commerce — Thomann-grade density.
+   ============================================================ */
+
+:root {
+  /* --- Accent (violet) --- */
+  /* Previous palettes — revert by restoring one of these:
+     taupe:  --accent:#998780; --accent-hover:#7D6F69; --accent-press:#7D6F69;
+             --accent-tint:#F3F1F0; --accent-tint-2:#F8F7F7; --violet:#998780; --violet-bg:#F3F1F0;
+     indigo: --accent:#3D00EC; --accent-hover:#3200C4; --accent-press:#2A009E;
+             --accent-tint:#ECE6FE; --accent-tint-2:#F5F1FF; --violet:#7C3FF2; --violet-bg:#EDE6FE; */
+  --accent: #954FFF;        /* Buttons, "Каталог", links, active states */
+  --accent-hover: #7A41D1;  /* Hover for filled accent surfaces */
+  --accent-press: #7A41D1;  /* Pressed */
+  --accent-tint: #F2EAFF;   /* Secondary button / icon button / badge fill */
+  --accent-tint-2: #F8F3FF; /* Very light violet wash */
+
+  /* --- Violet (highlight, "Хит" badge, promo) --- */
+  --violet: #954FFF;
+  --violet-bg: #F2EAFF;
+
+  /* --- Sale / discount (pink-red) --- */
+  --sale: #E0466F;
+  --sale-bg: #FCE9EF;
+
+  /* --- Text --- */
+  --text: #1A1A24;          /* Primary text */
+  --text-muted: #6B6B78;    /* Secondary text, descriptions */
+  --text-hint: #9A9AA6;     /* Meta captions, placeholders */
+  --text-on-accent: #FFFFFF;
+
+  /* --- Surfaces & background --- */
+  --surface: #FFFFFF;       /* Cards, modals, active inputs */
+  --surface-2: #F1F1F4;     /* Image backgrounds, passive surfaces */
+  --bg: #F4F4F7;            /* Page background (cool light gray) */
+
+  /* --- Promo panels (midnight: neutral graphite, not purple) --- */
+  --panel-dark: #14141A;    /* Near-black hero banner */
+  --panel-accent: #2A2A38;  /* Graphite promo */
+  --panel-soft: #E8E8EE;    /* Soft cool-gray promo */
+
+  /* --- Borders --- */
+  --border: #ECECF0;        /* Default hairline border */
+  --border-2: #DEDEE4;      /* Stronger border, hover */
+
+  /* --- Semantic --- */
+  --success: #2BA86B;       /* "В наличии", "Новинка" */
+  --success-bg: #E5F5EE;
+  --warning: #B7791F;       /* Под заказ */
+  --warning-bg: #FBF1DD;
+  --error: #D23B5A;
+  --error-bg: #FCE9EE;
+
+  /* Input validation borders */
+  --error-border: #D9667E;
+  --success-border: #5FBE93;
+
+  /* In-stock / backorder dots */
+  --dot-in: #2BA86B;
+  --dot-order: #E0A23A;
+
+  /* Rating stars (dark, per ЦМИ) */
+  --star-on: #2D2D38;
+  --star-off: #D8D8DE;
+
+  /* --- Semantic aliases (use these in components) --- */
+  --text-body: var(--text);
+  --text-secondary: var(--text-muted);
+  --text-meta: var(--text-hint);
+  --link: var(--accent);
+  --surface-card: var(--surface);
+  --surface-image: var(--surface-2);
+  --page-bg: var(--bg);
+
+  /* Dark (near-black) button — darkest surface in the system */
+  --btn-dark: #1A1A24;
+  --btn-dark-hover: #2E2E3A;
+}

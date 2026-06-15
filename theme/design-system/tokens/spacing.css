@@ -1,0 +1,21 @@
+/* ============================================================
+   SPACING TOKENS
+   Rhythm: 4 · 8 · 12 · 16 · 24 · 32 · 48 · 64
+   ============================================================ */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* --- Semantic --- */
+  --pad-card: 16px;        /* inner card padding (16–20) */
+  --gap-grid: 14px;        /* gap between cards in a grid (12–16) */
+  --gap-section: 56px;     /* page section gap (48–64) */
+  --gap-inline: 10px;      /* elements inside a component (8–12) */
+}

@@ -1,0 +1,28 @@
+/* ============================================================
+   RADII & ELEVATION TOKENS
+   ============================================================ */
+
+:root {
+  /* --- Corner radii --- */
+  --r-tag: 6px;     /* tags, tiny badges */
+  --r-input: 999px; /* inputs, selects — fully rounded (pill) */
+  --r-btn: 999px;   /* buttons — fully rounded (pill) */
+  --r-card: 14px;   /* product cards, blocks */
+  --r-modal: 16px;  /* modals, large blocks */
+  --r-pill: 999px;  /* chips, pills, rounded badges */
+  --r-full: 999px;
+
+  /* --- Borders --- */
+  --bw-hair: 0.5px;  /* hairline card border */
+  --bw-thin: 1px;    /* input border */
+  --bw-med: 1.5px;   /* outline button */
+
+  /* --- Elevation (soft, warm-tinted shadows) ---
+     The system is flat: surfaces are separated by hairline
+     borders, not shadows. Shadows are reserved for floating
+     layers (dropdowns, toasts, modals, sticky bars). */
+  --shadow-sm: 0 1px 2px rgba(20, 18, 16, 0.04);
+  --shadow-md: 0 4px 16px rgba(20, 18, 16, 0.08);
+  --shadow-lg: 0 12px 40px rgba(20, 18, 16, 0.12);
+  --shadow-pop: 0 8px 28px rgba(20, 18, 16, 0.14);
+}

@@ -1,0 +1,71 @@
+/* ============================================================
+   BASE — minimal reset + element defaults bound to tokens.
+   ============================================================ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text-body);
+  background: var(--page-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, p, figure { margin: 0; }
+
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+img { display: block; max-width: 100%; }
+
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+::selection { background: var(--accent); color: var(--text-on-accent); }
+
+/* --- Typographic helpers --- */
+.ds-display {
+  font-size: var(--fs-display);
+  font-weight: var(--fw-black);
+  letter-spacing: var(--ls-display);
+  line-height: var(--lh-tight);
+}
+.ds-h1 {
+  font-size: var(--fs-h1);
+  font-weight: var(--fw-extrabold);
+  letter-spacing: var(--ls-h1);
+  line-height: var(--lh-heading);
+}
+.ds-h2 {
+  font-size: var(--fs-h2);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-h2);
+  line-height: var(--lh-heading);
+}
+.ds-h3 {
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-h3);
+}
+.ds-meta {
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-meta);
+  text-transform: uppercase;
+  color: var(--text-hint);
+}
+.ds-price {
+  font-size: var(--fs-price);
+  font-weight: var(--fw-black);
+  letter-spacing: -0.03em;
+  color: var(--accent);
+}

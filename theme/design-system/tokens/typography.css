@@ -1,0 +1,51 @@
+/* ============================================================
+   TYPOGRAPHY TOKENS
+   Inter (Cyrillic + Latin). One family, weight + tracking
+   carry the hierarchy. Tight negative tracking on headings.
+   ============================================================ */
+
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: var(--font-sans);
+
+  /* --- Type scale (size) --- */
+  --fs-display: 34px;   /* Hero headline */
+  --fs-h1: 24px;        /* Page / category titles */
+  --fs-h2: 19px;        /* Section titles, product names */
+  --fs-h3: 15px;        /* Subheads, card titles */
+  --fs-body: 14px;      /* Descriptions, spec text */
+  --fs-small: 12px;     /* Meta, helper text */
+  --fs-meta: 11px;      /* Brand / SKU / category (uppercase) */
+  --fs-price: 20px;     /* Price */
+  --fs-price-old: 13px; /* Strikethrough old price */
+  --fs-link: 13px;
+
+  /* --- Weights --- */
+  --fw-regular: 400;   /* @kind font */
+  --fw-medium: 500;    /* @kind font */
+  --fw-semibold: 600;  /* @kind font */
+  --fw-bold: 700;      /* @kind font */
+  --fw-extrabold: 800; /* @kind font */
+  --fw-black: 900;     /* @kind font */
+
+  /* --- Letter spacing --- */
+  --ls-display: -0.04em;
+  --ls-h1: -0.03em;
+  --ls-h2: -0.02em;
+  --ls-h3: -0.01em;
+  --ls-meta: 0.08em;   /* uppercase meta */
+
+  /* --- Line heights --- */
+  --lh-tight: 1.1;     /* @kind font */
+  --lh-heading: 1.2;   /* @kind font */
+  --lh-body: 1.55;     /* @kind font */
+  --lh-relaxed: 1.6;   /* @kind font */
+
+  /* --- Semantic aliases --- */
+  --type-display-weight: var(--fw-black);
+  --type-h1-weight: var(--fw-extrabold);
+  --type-h2-weight: var(--fw-bold);
+  --type-h3-weight: var(--fw-semibold);
+  --type-price-weight: var(--fw-black);
+  --type-meta-weight: var(--fw-bold);
+}
