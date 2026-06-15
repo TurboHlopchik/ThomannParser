@@ -136,30 +136,44 @@ python3 5_exporter.py --use-russian --split-by-category --export-categories
 
 ---
 
-## Импорт в MODX MiniShop2
+## Импорт в MODX 3 + MiniShop3 (ImpEx3)
 
-1. Установите extra **msImport** через MODX Extras
-2. `Компоненты → MiniShop2 → Импорт`
-3. Загрузите XML файл нужной категории
-4. Настройте маппинг полей по таблице ниже
+Связка **MODX 3 + MiniShop3**. Импорт — через **ImpEx3** (modstore.pro), формат
+**CSV** (не XML; XML-ветка экспортёра осталась только для старого MiniShop2 и не
+используется). `5_exporter.py` по умолчанию отдаёт CSV под ImpEx3.
+
+> `msImportExport` — это инструмент для MiniShop**2** (таблицы `ms2_*`), на
+> MiniShop3 он не подходит. Его преемник для MS3 — **ImpEx3**.
+
+1. Установите **ImpEx3** через modstore.pro
+2. `Компоненты → ImpEx3 → Импорт`
+3. Загрузите CSV нужной категории (рекомендуется `--split-by-category`)
+4. На шаге маппинга сопоставьте колонки по таблице ниже
 
 ### Маппинг полей
 
-| Поле файла    | Поле MiniShop2 | Описание |
-|---------------|----------------|----------|
-| `pagetitle`   | pagetitle      | Название товара |
-| `longtitle`   | longtitle      | Бренд + название |
-| `alias`       | alias          | URL slug |
-| `description` | description    | Краткое описание |
-| `content`     | content        | Полное HTML описание |
-| `price`       | price          | Цена |
-| `old_price`   | old_price      | Старая цена |
-| `article`     | article        | Артикул (SKU) |
-| `image`       | image          | Главное фото (URL) |
-| `gallery`     | gallery        | Галерея (разделитель `\|\|`) |
-| `category`    | category       | Путь категории |
-| `brand`       | vendor         | Бренд |
-| `properties`  | options        | Характеристики |
+| Колонка CSV        | Поле MiniShop3 | Описание |
+|--------------------|----------------|----------|
+| `pagetitle`        | pagetitle      | Название товара |
+| `longtitle`        | longtitle      | Бренд + название |
+| `alias`            | alias          | URL slug |
+| `description`      | description    | Краткое описание |
+| `content`          | content        | Полное HTML описание |
+| `price`            | price          | Цена |
+| `old_price`        | old_price      | Старая цена |
+| `article`          | article        | Артикул (SKU) |
+| `image`            | image          | Главное фото (URL) |
+| `gallery`          | gallery        | Галерея, несколько URL через `\|\|` |
+| `category`         | parent / категория | Путь категории — ImpEx3 строит дерево |
+| `vendor`           | vendor         | Бренд (производитель) |
+| `option.<ключ>`    | опция товара   | Характеристики → фильтруемые опции MS3 |
+
+**Характеристики** выгружаются как отдельные колонки `option.<ключ>`
+(например `option.body`, `option.number_of_frets`). MiniShop3 создаёт по ним
+опции автоматически, и товары становятся фильтруемыми по этим параметрам. Набор
+опций в каждом файле — объединение характеристик всех товаров категории, поэтому
+импортируйте **по категориям** (`--split-by-category`), чтобы колонки оставались
+осмысленными.
 
 ---
 
