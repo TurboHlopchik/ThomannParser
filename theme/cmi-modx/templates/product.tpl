@@ -13,6 +13,7 @@
     [[*remains]] (наличие на складе).
   ============================================================
 *}
+[[$doc_head]]
 <div class="sf-wrap">
 
     <nav class="ms-crumbs" aria-label="breadcrumb">
@@ -131,3 +132,4 @@
         </div>
     </section>
 </div>
+[[$doc_foot]]

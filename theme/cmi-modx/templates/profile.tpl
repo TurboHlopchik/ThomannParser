@@ -13,6 +13,7 @@
   (доп. поля профиля: company, inn, kpp, legal_address, contact).
   ============================================================
 *}
+[[$doc_head]]
 [[!ifLoggedin? &else=`[[!Login? &loginResourceId=`17`]]`]]
 
 <div class="sf-wrap">
@@ -62,3 +63,4 @@
         </div>
     </div>
 </div>
+[[$doc_foot]]

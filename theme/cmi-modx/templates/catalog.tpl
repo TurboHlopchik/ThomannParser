@@ -10,6 +10,7 @@
     [[!msProducts]] — товары раздела (mFilter2 сам оборачивает вывод)
   ============================================================
 *}
+[[$doc_head]]
 <div class="sf-wrap">
 
     <nav class="ms-crumbs" aria-label="breadcrumb">
@@ -111,3 +112,4 @@
         </div>
     </section>
 </div>
+[[$doc_foot]]
